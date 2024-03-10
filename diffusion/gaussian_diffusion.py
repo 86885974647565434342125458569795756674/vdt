@@ -285,6 +285,9 @@ class GaussianDiffusion:
         assert t.shape == (B,)
         x = x.permute(0, 2, 1, 3, 4)
 
+        #start=th.cuda.Event(enable_timing=True)
+        #end=th.cuda.Event(enable_timing=True)
+        #start.record()
         if condition_frames is not None:
             predict_frame_length = x.shape[1]
             model_input = th.cat([condition_frames, x,], dim=1)
@@ -293,6 +296,12 @@ class GaussianDiffusion:
         else:
 
             model_output = model(x, t, **model_kwargs)
+        #end.record()
+        #th.cuda.synchronize()
+        #print("for:",start.elapsed_time(end))
+        #s2=th.cuda.Event(enable_timing=True)
+        #e2=th.cuda.Event(enable_timing=True)
+        #s2.record()
         x = x.permute(0, 2, 1, 3, 4)
         if not self.training:
             model_output = model_output.permute(0, 2, 1, 3, 4)
@@ -305,21 +314,22 @@ class GaussianDiffusion:
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
-            start=th.cuda.Event(enable_timing=True)
-            end=th.cuda.Event(enable_timing=True)
-            start.record()
+            #start=th.cuda.Event(enable_timing=True)
+            #end=th.cuda.Event(enable_timing=True)
+            #start.record()
             min_log = _extract_into_tensor(self.posterior_log_variance_clipped, t, x.shape)
-            end.record()
-            th.cuda.synchronize()
-            print(start.elapsed_time(end))
-            s2=th.cuda.Event(enable_timing=True)
-            e2=th.cuda.Event(enable_timing=True)
-            s2.record()
+            #end.record()
+            #th.cuda.synchronize()
+            #print(start.elapsed_time(end))
+            #min_log = _extract_into_tensor(self.posterior_log_variance_clipped, t, x.shape)           
+            #s2=th.cuda.Event(enable_timing=True)
+            #e2=th.cuda.Event(enable_timing=True)
+            #s2.record()
             max_log = _extract_into_tensor(np.log(self.betas), t, x.shape)
-            e2.record()
-            th.cuda.synchronize()
-            print(s2.elapsed_time(e2))
-            print("-----------------")
+            #e2.record()
+            #th.cuda.synchronize()
+            #print(s2.elapsed_time(e2))
+            #print("-----------------")
             frac = (model_var_values + 1) / 2
             model_log_variance = frac * max_log + (1 - frac) * min_log
             model_variance = th.exp(model_log_variance)
@@ -355,6 +365,9 @@ class GaussianDiffusion:
         model_mean, _, _ = self.q_posterior_mean_variance(x_start=pred_xstart, x_t=x, t=t)
 
         assert model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape
+        #e2.record()
+        #th.cuda.synchronize()
+        #print("to:",s2.elapsed_time(e2))
         return {
             "mean": model_mean,
             "variance": model_variance,
