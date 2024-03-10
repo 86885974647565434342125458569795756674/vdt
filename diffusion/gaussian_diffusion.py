@@ -305,8 +305,21 @@ class GaussianDiffusion:
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
+            start=th.cuda.Event(enable_timing=True)
+            end=th.cuda.Event(enable_timing=True)
+            start.record()
             min_log = _extract_into_tensor(self.posterior_log_variance_clipped, t, x.shape)
+            end.record()
+            th.cuda.synchronize()
+            print(start.elapsed_time(end))
+            s2=th.cuda.Event(enable_timing=True)
+            e2=th.cuda.Event(enable_timing=True)
+            s2.record()
             max_log = _extract_into_tensor(np.log(self.betas), t, x.shape)
+            e2.record()
+            th.cuda.synchronize()
+            print(s2.elapsed_time(e2))
+            print("-----------------")
             frac = (model_var_values + 1) / 2
             model_log_variance = frac * max_log + (1 - frac) * min_log
             model_variance = th.exp(model_log_variance)
@@ -469,19 +482,27 @@ class GaussianDiffusion:
         :return: a non-differentiable batch of samples.
         """
         final = None
-        for sample in self.p_sample_loop_progressive(
-            model,
-            shape,
-            noise=noise,
-            clip_denoised=clip_denoised,
-            denoised_fn=denoised_fn,
-            cond_fn=cond_fn,
-            model_kwargs=model_kwargs,
-            device=device,
-            progress=progress,
-            condition_frames=condition_frames
-        ):
-            final = sample
+        with th.profiler.profile(
+                schedule=th.profiler.schedule(wait=2,warmup=1,active=2,repeat=1),
+                on_trace_ready=th.profiler.tensorboard_trace_handler('/vdt/VDT/tb'),
+                record_shapes=True,
+                profile_memory=True,
+                with_stack=True
+        ) as prof:
+            for sample in self.p_sample_loop_progressive(
+                    model,
+                    shape,
+                    noise=noise,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    cond_fn=cond_fn,
+                    model_kwargs=model_kwargs,
+                    device=device,
+                    progress=progress,
+                    condition_frames=condition_frames
+                ):
+                    prof.step()
+                    final = sample
         return final["sample"]
 
     def p_sample_loop_progressive(
@@ -911,6 +932,7 @@ class GaussianDiffusion:
             "mse": mse,
         }
 
+#intoex=0
 
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
     """
@@ -921,7 +943,24 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
                             dimension equal to the length of timesteps.
     :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
     """
+    #tmp=th.from_numpy(arr)
+    #print(tmp.shape)
+    #print(tmp.dtype)
+    #print(tmp.is_contiguous())
+    #print(id(timesteps))
+    #print(id(broadcast_shape))
     res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+    #global intoex
+    #if intoex>=2:
+        #start=th.cuda.Event(enable_timing=True)
+        #end=th.cuda.Event(enable_timing=True)
+        #start.record()
+    #res = tmp.to(device=timesteps.device)[timesteps].float()
+    #if intoex>=2:
+        #end.record()
+        #th.cuda.synchronize()
+        #print(start.elapsed_time(end))
+    #intoex+=1
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res + th.zeros(broadcast_shape, device=timesteps.device)
